@@ -39,6 +39,23 @@ echo "DB_FILE_NAME=local.db" > .env
 npm run db:push
 ```
 
+## Running Redis
+
+The API uses Redis for caching. Start Redis before running the server:
+
+**Docker**
+
+```bash
+docker run -d -p 6379:6379 --name redis redis
+```
+
+**Verify Redis is running:**
+
+```bash
+redis-cli ping
+# Should respond: PONG
+```
+
 ## Running the Server
 
 ```bash
@@ -103,6 +120,11 @@ curl -X DELETE "http://localhost:3000/tasks/1"
 curl -X PATCH "http://localhost:3000/tasks/1" \
   -H "Content-Type: application/json" \
   -d '{"title": "updated title", "priority": "LOW"}'
+```
+
+**Get summary statistics:**
+```bash
+curl "http://localhost:3000/summary"
 ```
 
 ---
