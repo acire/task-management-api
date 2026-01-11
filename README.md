@@ -16,11 +16,7 @@ A REST API for a simple task management system.
 - SQLite (file-backed)
 - Drizzle ORM
 - Zod (validation)
-
-## Prerequisites
-
-- Node.js 18+
-- npm
+- Redis (for caching)
 
 ## Installation
 
@@ -122,7 +118,20 @@ curl -X PATCH "http://localhost:3000/tasks/1" \
   -d '{"title": "updated title", "priority": "LOW"}'
 ```
 
+**Start a task:**
+
+```bash
+curl -X POST "http://localhost:3000/tasks/1/start"
+```
+
+**Complete a task:**
+
+```bash
+curl -X POST "http://localhost:3000/tasks/1/complete"
+```
+
 **Get summary statistics:**
+
 ```bash
 curl "http://localhost:3000/summary"
 ```

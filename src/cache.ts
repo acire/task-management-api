@@ -50,3 +50,8 @@ export async function incrementTaskListVersion() {
     console.warn('Redis INCR failed: ', error);
   }
 }
+
+export async function invalidateTaskCache(id: number) {
+  await incrementTaskVersion(id);
+  await incrementTaskListVersion();
+}

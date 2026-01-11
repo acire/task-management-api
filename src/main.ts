@@ -5,12 +5,16 @@ import { priorities, tasksTable, type Priority } from './schema.js';
 import { and, eq, isNull, isNotNull, count, avg, ne, sql } from 'drizzle-orm';
 import * as z from 'zod';
 import { redis } from './redis.js';
-import { getTaskCacheKey, getTaskListCacheKey, getTaskSummaryCacheKey, incrementTaskListVersion, incrementTaskVersion, TASK_LIST_TTL, TASK_TTL } from './cache.js';
+import { getTaskCacheKey, getTaskListCacheKey, getTaskSummaryCacheKey, incrementTaskListVersion, incrementTaskVersion, invalidateTaskCache, TASK_LIST_TTL, TASK_TTL } from './cache.js';
 
-const db = drizzle(process.env.DB_FILE_NAME!);
+const DB_FILE_NAME = process.env.DB_FILE_NAME;
+if (!DB_FILE_NAME) {
+  throw new Error('DB_FILE_NAME is not set');
+}
+const db = drizzle(DB_FILE_NAME);
 const app = express();
 app.use(express.json());
-const PORT = 3000;
+const PORT = process.env.PORT ?? 3000;
 
 // Create a new task
 const CreateTaskSchema = z.object({
@@ -27,15 +31,13 @@ app.post('/tasks', async (req, res) => {
 
   try {
     const task: typeof tasksTable.$inferInsert = parsed.data;
-      const [ createdTask ] = await db.insert(tasksTable).values(task).returning({ id: tasksTable.id });
-      if (!createdTask) {
-        return res.status(500).json({ error: 'Failed to create task' });
-      }
+    const [ createdTask ] = await db.insert(tasksTable).values(task).returning({ id: tasksTable.id });
+    if (!createdTask) {
+      return res.status(500).json({ error: 'Failed to create task' });
+    }
 
-      await incrementTaskVersion(createdTask.id);
-      await incrementTaskListVersion();
-
-      res.status(201).location(`/tasks/${createdTask.id}`).json({ message: `Task ${createdTask.id} created` });
+    await invalidateTaskCache(createdTask.id);
+    res.status(201).location(`/tasks/${createdTask.id}`).json({ message: `Task ${createdTask.id} created` });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -49,9 +51,13 @@ const TaskFilterSchema = z.object({
 });
 
 app.get('/tasks', async (req, res) => {
-  const { priority, complete } = TaskFilterSchema.parse(req.query);
-  const cacheKey = await getTaskListCacheKey({ priority, complete });
+  const parsed = TaskFilterSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: z.flattenError(parsed.error).fieldErrors });
+  }
+  const { priority, complete } = parsed.data;
 
+  const cacheKey = await getTaskListCacheKey({ priority, complete });
   try {
     const cached = await redis.get(cacheKey);
     if (cached) {
@@ -129,14 +135,12 @@ app.delete('/tasks/:id', async (req, res) => {
     return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  await incrementTaskVersion(id);
-  await incrementTaskListVersion();
-
   try {
     const result = await db.delete(tasksTable).where(eq(tasksTable.id, id));
     if (result.rowsAffected === 0) {
       return res.status(404).json({ error: `Task ${id} not found` });
     }
+    await invalidateTaskCache(id);
     return res.status(200).json({ message: `Task ${id} deleted` });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -161,9 +165,6 @@ app.patch('/tasks/:id', async (req, res) => {
     return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  await incrementTaskVersion(id);
-  await incrementTaskListVersion();
-
   const parsed = UpdateTaskSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ errors: z.flattenError(parsed.error).fieldErrors });
@@ -177,6 +178,7 @@ app.patch('/tasks/:id', async (req, res) => {
     if (result.rowsAffected === 0) {
       return res.status(404).json({ error: `Task ${id} not found` });
     }
+    await invalidateTaskCache(id);
     return res.status(200).json({ message: `Task ${id} updated` });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -192,20 +194,16 @@ app.post('/tasks/:id/start', async (req, res) => {
     return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  await incrementTaskVersion(id);
-  await incrementTaskListVersion();
-
   try {
-    const task = await db.select().from(tasksTable).where(eq(tasksTable.id, id)).limit(1);
-    console.log(task);
-    if (!task[0]) {
-      return res.status(404).json({ error: `Task ${id} not found` });
-    }
-    if (task[0].startedAt !== null) {
+    const result = await db.update(tasksTable)
+      .set({ startedAt: sql`(unixepoch())` })
+      .where(and(eq(tasksTable.id, id), isNull(tasksTable.startedAt)));
+
+    if (result.rowsAffected === 0) {
       return res.status(400).json({ error: `Task ${id} already started` });
     }
 
-    await db.update(tasksTable).set({ startedAt: sql`(unixepoch())` }).where(eq(tasksTable.id, id));
+    await invalidateTaskCache(id);
     return res.status(200).json({ message: `Task ${id} started` });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -221,22 +219,16 @@ app.post('/tasks/:id/complete', async (req, res) => {
     return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  await incrementTaskVersion(id);
-  await incrementTaskListVersion();
-
   try {
-    const task = (await db.select().from(tasksTable).where(eq(tasksTable.id, id)).limit(1))[0];
-    if (!task) {
-      return res.status(404).json({ error: `Task ${id} not found` });
-    }
-    else if (task.startedAt === null) {
-      return res.status(400).json({ error: `Task ${id} not started` });
-    }
-    else if (task.completedAt !== null) {
-      return res.status(400).json({ error: `Task ${id} already completed` });
+    const result = await db.update(tasksTable)
+      .set({ completedAt: sql`(unixepoch())` })
+      .where(and(eq(tasksTable.id, id), isNotNull(tasksTable.startedAt), isNull(tasksTable.completedAt)));
+
+    if (result.rowsAffected === 0) {
+      return res.status(400).json({ error: `Unable to complete task ${id}: not started or already completed` });
     }
 
-    await db.update(tasksTable).set({ completedAt: sql`(unixepoch())` }).where(eq(tasksTable.id, id));
+    await invalidateTaskCache(id);
     return res.status(200).json({ message: `Task ${id} completed` });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -287,7 +279,7 @@ app.listen(PORT, () => {
 
 function parseId(id: string): number {
   const parsed = Number(id);
-  if (isNaN(parsed) || !Number.isInteger(parsed)) {
+  if (isNaN(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
     throw new Error('Invalid task ID');
   }
   return parsed;
