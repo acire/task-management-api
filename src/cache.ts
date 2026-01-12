@@ -4,13 +4,25 @@ import type { Priority } from "./schema.js";
 export const TASK_TTL = 120;
 export const TASK_LIST_TTL = 120;
 
-export async function getTaskCacheKey(id: number) {
-  const version = await redis.get(`tasks:${id}:version`) ?? "1";
+// Helper to safely get from Redis, returns null if Redis is unavailable
+async function safeRedisGet(key: string): Promise<string | null> {
+  if (!redis.isReady) return null;
+  try {
+    return await redis.get(key);
+  } catch {
+    return null;
+  }
+}
+
+export async function getTaskCacheKey(id: number | string): Promise<string | null> {
+  if (!redis.isReady) return null;
+  const version = await safeRedisGet(`tasks:${id}:version`) ?? "1";
   return `tasks:${id}:v${version}`;
 }
 
-export async function getTaskListCacheKey({ priority, complete }: { priority: Priority | undefined, complete: boolean | undefined }): Promise<string> {
-  const version = await redis.get('tasks:list:version') ?? '1';
+export async function getTaskListCacheKey({ priority, complete }: { priority: Priority | undefined, complete: boolean | undefined }): Promise<string | null> {
+  if (!redis.isReady) return null;
+  const version = await safeRedisGet('tasks:list:version') ?? '1';
   const parts = [ 'tasks' ];
   if (priority === undefined && complete === undefined) {
     parts.push('all');
@@ -26,8 +38,9 @@ export async function getTaskListCacheKey({ priority, complete }: { priority: Pr
   return `${parts.join(':')}:v${version}`;
 }
 
-export async function getTaskSummaryCacheKey(): Promise<string> {
-  const version = await redis.get('tasks:list:version') ?? '1'; // using the same version as the list
+export async function getTaskSummaryCacheKey(): Promise<string | null> {
+  if (!redis.isReady) return null;
+  const version = await safeRedisGet('tasks:list:version') ?? '1';
   return `tasks:summary:v${version}`;
 }
 

@@ -58,14 +58,16 @@ app.get('/tasks', async (req, res) => {
   const { priority, complete } = parsed.data;
 
   const cacheKey = await getTaskListCacheKey({ priority, complete });
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
+  if (cacheKey) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(JSON.parse(cached));
+      }
     }
-  }
-  catch (error) {
-    console.warn('Redis GET failed: ', error);
+    catch (error) {
+      console.warn('Redis GET failed: ', error);
+    }
   }
 
   try {
@@ -75,11 +77,13 @@ app.get('/tasks', async (req, res) => {
       complete === false ? isNull(tasksTable.completedAt) : undefined,
     ));
 
-    try {
-      await redis.set(cacheKey, JSON.stringify(tasks), { EX: TASK_LIST_TTL });
-    }
-    catch (error) {
-      console.warn('Redis SET failed: ', error);
+    if (cacheKey) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(tasks), { EX: TASK_LIST_TTL });
+      }
+      catch (error) {
+        console.warn('Redis SET failed: ', error);
+      }
     }
 
     res.status(200).json(tasks);
@@ -97,15 +101,17 @@ app.get('/tasks/:id', async (req, res) => {
     return res.status(400).json({ error: 'Invalid task ID' });
   }
 
-  const cacheKey = await getTaskCacheKey(id);
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
+  const cacheKey = await getTaskCacheKey('all');
+  if (cacheKey) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(JSON.parse(cached));
+      }
     }
-  }
-  catch (error) {
-    console.warn('Redis GET failed: ', error);
+    catch (error) {
+      console.warn('Redis GET failed: ', error);
+    }
   }
 
   try {
@@ -113,11 +119,13 @@ app.get('/tasks/:id', async (req, res) => {
     if (!task) {
       return res.status(404).json({ error: `Task ${id} not found` });
     }
-    try {
-      await redis.set(cacheKey, JSON.stringify(task), { EX: TASK_TTL });
-    }
-    catch (error) {
-      console.warn('Redis SET failed: ', error);
+    if (cacheKey) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(task), { EX: TASK_TTL });
+      }
+      catch (error) {
+        console.warn('Redis SET failed: ', error);
+      }
     }
     res.status(200).json(task);
   }
@@ -238,14 +246,16 @@ app.post('/tasks/:id/complete', async (req, res) => {
 // Return summary statistics (total tasks, completed %, average completion time in seconds)
 app.get('/summary', async (req, res) => {
   const cacheKey = await getTaskSummaryCacheKey();
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(JSON.parse(cached));
+  if (cacheKey) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.status(200).json(JSON.parse(cached));
+      }
     }
-  }
-  catch (error) {
-    console.warn('Redis GET failed: ', error);
+    catch (error) {
+      console.warn('Redis GET failed: ', error);
+    }
   }
 
   try {
@@ -259,11 +269,13 @@ app.get('/summary', async (req, res) => {
       ...queries,
       percentComplete: queries?.totalTasks ? (queries.completedTasks / queries.totalTasks) * 100 : 0,
     }
-    try {
-      await redis.set(cacheKey, JSON.stringify(summary), { EX: TASK_LIST_TTL });
-    }
-    catch (error) {
-      console.warn('Redis SET failed: ', error);
+    if (cacheKey) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(summary), { EX: TASK_LIST_TTL });
+      }
+      catch (error) {
+        console.warn('Redis SET failed: ', error);
+      }
     }
 
     res.status(200).json(summary);
