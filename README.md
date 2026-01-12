@@ -16,50 +16,64 @@ A REST API for a simple task management system.
 - SQLite (file-backed)
 - Drizzle ORM
 - Zod (validation)
-- Redis (for caching)
+- Redis (caching)
+- Docker
 
-## Installation
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) (recommended)
+- Or: Node.js 18+ and Redis (for local development)
+
+## Quick Start (Docker)
+
+The easiest way to run the project:
 
 ```bash
 # Clone the repository
 git clone <repo-url>
 cd task-management-api
 
+# Start everything (API + Redis)
+docker-compose up --build
+```
+
+The API will be running at `http://localhost:3000`.
+
+**Useful Docker commands:**
+
+```bash
+# Stop containers
+docker-compose down
+
+# Rebuild after code changes
+docker-compose up --build
+
+# View logs
+docker-compose logs -f api
+
+# Access Redis CLI
+docker-compose exec redis redis-cli
+```
+
+## Local Development (without Docker)
+
+To run locally without Docker:
+
+```bash
 # Install dependencies
 npm install
 
 # Create .env file
-echo "DB_FILE_NAME=local.db" > .env
+echo "DB_FILE_NAME=file:local.db" > .env
 
 # Initialize the database
-npm run db:push
-```
+npm run migrate
 
-## Running Redis
-
-The API uses Redis for caching. Start Redis before running the server:
-
-**Docker**
-
-```bash
+# Start Redis (using Docker, or install locally)
 docker run -d -p 6379:6379 --name redis redis
-```
 
-**Verify Redis is running:**
-
-```bash
-redis-cli ping
-# Should respond: PONG
-```
-
-## Running the Server
-
-```bash
-# Development (with hot reload)
+# Run the dev server (with hot reload)
 npm run watch
-
-# Production
-npm run start
 ```
 
 The server runs on `http://localhost:3000` by default.
